@@ -140,6 +140,7 @@ UPROGS=\
 	$U/_init\
 	$U/_kill\
 	$U/_sleep\
+	$U/_pingpong\
 	$U/_ln\
 	$U/_ls\
 	$U/_mkdir\
