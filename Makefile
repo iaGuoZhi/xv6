@@ -142,6 +142,7 @@ UPROGS=\
 	$U/_sleep\
 	$U/_pingpong\
 	$U/_primes\
+	$U/_xargs\
 	$U/_find\
 	$U/_ln\
 	$U/_ls\
