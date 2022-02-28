@@ -149,6 +149,7 @@ freeproc(struct proc *p)
   p->chan = 0;
   p->killed = 0;
   p->xstate = 0;
+  p->trace_bits = 0;
   p->state = UNUSED;
 }
 
@@ -292,6 +293,9 @@ fork(void)
   safestrcpy(np->name, p->name, sizeof(p->name));
 
   pid = np->pid;
+
+  // copy trace bits
+  np->trace_bits = p->trace_bits;
 
   np->state = RUNNABLE;
 
