@@ -440,3 +440,55 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return -1;
   }
 }
+
+void
+static print_single_line(int level, int idx, pte_t pte, uint64 pa)
+{
+  int i = 0;
+  char *prefix = "..";
+
+  for(i = 0; i <= level; ++i)
+  {
+    printf("%s", prefix);  
+    if(i < level)
+      printf(" ");
+    else
+      printf("%d", idx);
+  }
+
+  printf(": pte %p pa %p\n", (uint64)pte, pa);
+}
+
+// Recursively print page-table pages
+void
+static __vmprint(pagetable_t pagetable, int level)
+{
+  int i;
+
+  // there are 2^9 = 512 page-table pages.
+  for(i = 0; i < 512; ++i){
+    pte_t pte = pagetable[i];
+    uint64 child = PTE2PA(pte);
+
+    if(pte & PTE_V){
+      print_single_line(level, i, pte, child);
+      if((pte & (PTE_R|PTE_W|PTE_X)) == 0){
+         // this PTE points to a lower-level page table. 
+         __vmprint((pagetable_t)child, level + 1);
+      }
+    }
+  }
+  return;
+}
+
+// Recursively print page-table pages
+void
+vmprint(pagetable_t pagetable)
+{
+  int level = 0;
+
+  printf("page table %p\n", (uint64)pagetable);
+  __vmprint(pagetable, level);
+
+  return;
+}
