@@ -21,6 +21,8 @@ static void freeproc(struct proc *p);
 
 extern char trampoline[]; // trampoline.S
 
+extern pagetable_t kernel_pagetable;
+
 // initialize the proc table at boot time.
 void
 procinit(void)
@@ -30,16 +32,6 @@ procinit(void)
   initlock(&pid_lock, "nextpid");
   for(p = proc; p < &proc[NPROC]; p++) {
       initlock(&p->lock, "proc");
-
-      // Allocate a page for the process's kernel stack.
-      // Map it high in memory, followed by an invalid
-      // guard page.
-      char *pa = kalloc();
-      if(pa == 0)
-        panic("kalloc");
-      uint64 va = KSTACK((int) (p - proc));
-      kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
-      p->kstack = va;
   }
   kvminithart();
 }
@@ -93,6 +85,8 @@ static struct proc*
 allocproc(void)
 {
   struct proc *p;
+  char *pa;
+  uint64 va;
 
   for(p = proc; p < &proc[NPROC]; p++) {
     acquire(&p->lock);
@@ -121,6 +115,21 @@ found:
     return 0;
   }
 
+  // Alloc kenrel pagetable and init
+  kvminit_perproc(p);
+
+  // Allocate a page for the process's kernel stack.
+  // Map it high in memory, followed by an invalid
+  // guard page.
+  pa = kalloc();
+  if(pa == 0)
+    panic("kalloc");
+  va = KSTACK((int)(p - proc));
+  kvmmap_perproc(p->kpagetable, va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+  // Map stack page in kernel_pagetable
+  kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
+  p->kstack = va;
+
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
@@ -142,6 +151,12 @@ freeproc(struct proc *p)
   if(p->pagetable)
     proc_freepagetable(p->pagetable, p->sz);
   p->pagetable = 0;
+  if(p->kpagetable){
+    // Free process's stack in kernel_pagetable
+    kvm_free_stack(p->kstack, 1);
+    proc_freekpagetable(p->kpagetable, p->sz);
+  }
+  p->kpagetable = 0;
   p->sz = 0;
   p->pid = 0;
   p->parent = 0;
@@ -185,7 +200,15 @@ proc_pagetable(struct proc *p)
   return pagetable;
 }
 
-// Free a process's page table, and free the
+// Free a process's kernel page table without
+// freeing the physical memory it refers to.
+void
+proc_freekpagetable(pagetable_t pagetable, uint64 sz)
+{
+  kvmfree(pagetable, sz);
+}
+
+// Free a process's user page table, and free the
 // physical memory it refers to.
 void
 proc_freepagetable(pagetable_t pagetable, uint64 sz)
@@ -473,16 +496,22 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         c->proc = p;
+        w_satp(MAKE_SATP(p->kpagetable));
+        sfence_vma();
         swtch(&c->context, &p->context);
 
         // Process is done running for now.
-        // It should have changed its p->state before coming back.
+        w_satp(MAKE_SATP(kernel_pagetable));
+        sfence_vma();
+
+        // Process should have changed its p->state before coming back.
         c->proc = 0;
 
         found = 1;
       }
       release(&p->lock);
     }
+
 #if !defined (LAB_FS)
     if(found == 0) {
       intr_on();
