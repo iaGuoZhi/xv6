@@ -116,7 +116,7 @@ found:
   }
 
   // Alloc kenrel pagetable and init
-  kvminit_perproc(p);
+  p->kpagetable = kvminit_perproc();
 
   // Allocate a page for the process's kernel stack.
   // Map it high in memory, followed by an invalid
@@ -154,7 +154,7 @@ freeproc(struct proc *p)
   if(p->kpagetable){
     // Free process's stack in kernel_pagetable
     kvm_free_stack(p->kstack, 1);
-    proc_freekpagetable(p->kpagetable, p->sz);
+    proc_freekpagetable(p->kpagetable);
   }
   p->kpagetable = 0;
   p->sz = 0;
@@ -203,9 +203,9 @@ proc_pagetable(struct proc *p)
 // Free a process's kernel page table without
 // freeing the physical memory it refers to.
 void
-proc_freekpagetable(pagetable_t pagetable, uint64 sz)
+proc_freekpagetable(pagetable_t pagetable)
 {
-  kvmfree(pagetable, sz);
+  kvmfree(pagetable);
 }
 
 // Free a process's user page table, and free the
@@ -241,7 +241,7 @@ userinit(void)
   
   // allocate one user page and copy init's instructions
   // and data into it.
-  uvminit(p->pagetable, initcode, sizeof(initcode));
+  uvminit(p->pagetable, p->kpagetable, initcode, sizeof(initcode));
   p->sz = PGSIZE;
 
   // prepare for the very first "return" from kernel to user.
@@ -265,12 +265,13 @@ growproc(int n)
   struct proc *p = myproc();
 
   sz = p->sz;
+
   if(n > 0){
-    if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
+    if((sz = uvmalloc(p->pagetable, p->kpagetable, sz, sz + n)) == 0) {
       return -1;
     }
   } else if(n < 0){
-    sz = uvmdealloc(p->pagetable, sz, sz + n);
+    sz = uvmdealloc(p->pagetable, p->kpagetable, sz, sz + n);
   }
   p->sz = sz;
   return 0;
@@ -291,7 +292,7 @@ fork(void)
   }
 
   // Copy user memory from parent to child.
-  if(uvmcopy(p->pagetable, np->pagetable, p->sz) < 0){
+  if(uvmcopy(p->pagetable, np->pagetable, np->kpagetable, p->sz) < 0){
     freeproc(np);
     release(&np->lock);
     return -1;

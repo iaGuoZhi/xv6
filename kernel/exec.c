@@ -19,6 +19,7 @@ exec(char *path, char **argv)
   struct inode *ip;
   struct proghdr ph;
   pagetable_t pagetable = 0, oldpagetable;
+  pagetable_t kpagetable = 0,oldkpagetable;
   struct proc *p = myproc();
 
   begin_op();
@@ -35,8 +36,15 @@ exec(char *path, char **argv)
   if(elf.magic != ELF_MAGIC)
     goto bad;
 
+  // Alloc new user page table
   if((pagetable = proc_pagetable(p)) == 0)
     goto bad;
+  // Alloc new kernel page table
+  if((kpagetable = kvminit_perproc()) == 0)
+    goto bad;
+
+  // Map origin kernel stack
+  kvmmap_perproc(kpagetable, p->kstack, kvmpa(p->kstack), PGSIZE, PTE_R | PTE_W);
 
   // Load program into memory.
   for(i=0, off=elf.phoff; i<elf.phnum; i++, off+=sizeof(ph)){
@@ -49,7 +57,7 @@ exec(char *path, char **argv)
     if(ph.vaddr + ph.memsz < ph.vaddr)
       goto bad;
     uint64 sz1;
-    if((sz1 = uvmalloc(pagetable, sz, ph.vaddr + ph.memsz)) == 0)
+    if((sz1 = uvmalloc(pagetable, kpagetable, sz, ph.vaddr + ph.memsz)) == 0)
       goto bad;
     sz = sz1;
     if(ph.vaddr % PGSIZE != 0)
@@ -68,7 +76,7 @@ exec(char *path, char **argv)
   // Use the second as the user stack.
   sz = PGROUNDUP(sz);
   uint64 sz1;
-  if((sz1 = uvmalloc(pagetable, sz, sz + 2*PGSIZE)) == 0)
+  if((sz1 = uvmalloc(pagetable, kpagetable, sz, sz + 2*PGSIZE)) == 0)
     goto bad;
   sz = sz1;
   uvmclear(pagetable, sz-2*PGSIZE);
@@ -120,11 +128,20 @@ exec(char *path, char **argv)
   if(p->pid == 1)
     vmprint(p->pagetable);
 
+  // Commit kernel page table
+  oldkpagetable = p->kpagetable;
+  p->kpagetable = kpagetable;
+  w_satp(MAKE_SATP(p->kpagetable));
+  sfence_vma();
+  proc_freekpagetable(oldkpagetable);
+
   return argc; // this ends up in a0, the first argument to main(argc, argv)
 
  bad:
   if(pagetable)
     proc_freepagetable(pagetable, sz);
+  if(kpagetable)
+    proc_freekpagetable(kpagetable);
   if(ip){
     iunlockput(ip);
     end_op();
