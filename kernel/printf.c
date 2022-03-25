@@ -115,6 +115,22 @@ printf(char *fmt, ...)
 }
 
 void
+backtrace()
+{
+  uint64 fp, ra;
+  printf("backtrace:\n");
+  fp = r_fp();
+
+  while(PGROUNDDOWN(fp) >= KERNBASE){
+    ra = *(uint64 *)(fp - 0x8);
+    if(PGROUNDDOWN(ra) < KERNBASE)
+      break;
+    printf("%p\n", ra);
+    fp = *(uint64 *)(fp - 0x10);
+  }
+}
+
+void
 panic(char *s)
 {
   pr.locking = 0;
