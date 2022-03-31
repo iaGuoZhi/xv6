@@ -66,7 +66,12 @@ usertrap(void)
 
     syscall();
   } else if((which_dev = devintr()) != 0){
-    // ok
+    if(which_dev == 2){
+      p->sigalarm_passed_ticks += 1;
+      if(p->sigalarm_passed_ticks == p->sigalarm_total_ticks) {
+        p->trapframe->epc = (uint64)p->sigalarm_fn;
+      }
+    }
   } else {
 
     

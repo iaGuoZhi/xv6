@@ -113,6 +113,8 @@ allocproc(void)
 
 found:
   p->pid = allocpid();
+  p->sigalarm_passed_ticks = 0;
+  p->sigalarm_total_ticks = -1;
 
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
