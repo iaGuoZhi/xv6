@@ -134,7 +134,7 @@ uint64 sys_sigalarm(void)
 
   if(argint(0, &ticks) < 0)
     return -1;
-  if(argaddr(0, (void *)&fn) < 0)
+  if(argaddr(1, (void *)&fn) < 0)
     return -1;
 
   myproc()->sigalarm_total_ticks = ticks;
@@ -145,5 +145,9 @@ uint64 sys_sigalarm(void)
 
 uint64 sys_sigreturn(void)
 {
+  for(int i = 0; i < sizeof(struct sigreturn_context) / sizeof(uint64); ++i) {
+    *(((uint64 *) myproc()->trapframe) + i) =  *(((uint64 *) &(myproc()->sigreturn_context)) + i);
+  }
+  myproc()->in_sig_handler = 0;
   return 0;
 }
