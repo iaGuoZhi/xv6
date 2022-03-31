@@ -103,4 +103,7 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+  int sigalarm_total_ticks;    // Specified in sys_sigalarm
+  void (*sigalarm_fn)();       // Sigalarm handler
+  int sigalarm_passed_ticks;   // Ticks passed since last invoking sigalarm fn
 };
