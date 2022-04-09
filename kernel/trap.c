@@ -69,17 +69,8 @@ usertrap(void)
     // ok
   } else if(r_scause() == 13 || r_scause() == 15){
     // handle page fault trap
-    uint64 stval = r_stval();
-    uint64 va = PGROUNDDOWN(stval);
-    char *mem = kalloc();
-    if(mem == 0){
-      printf("usertrap(): page fault trap can not be handled\n");
+    if(handle_page_fault(p->pagetable, PGROUNDDOWN(r_stval())) == -1)
       p->killed = 1;
-    }
-    memset(mem, 0, PGSIZE);
-    if(mappages(p->pagetable, va, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0){
-      kfree(mem);
-    }
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
@@ -157,9 +148,17 @@ kerneltrap()
     panic("kerneltrap: interrupts enabled");
 
   if((which_dev = devintr()) == 0){
-    printf("scause %p\n", scause);
-    printf("sepc=%p stval=%p\n", r_sepc(), r_stval());
-    panic("kerneltrap");
+    if(r_scause() == 13 || r_scause() == 15) {
+      if(handle_page_fault(myproc()->pagetable, PGROUNDDOWN(r_stval())) == -1)
+        myproc()->killed = 1;
+
+      if(myproc()->killed)
+        exit(-1);
+    } else {
+      printf("scause %p\n", scause);
+      printf("sepc=%p stval=%p\n", r_sepc(), r_stval());
+      panic("kerneltrap");
+    }
   }
 
   // give up the CPU if this is a timer interrupt.

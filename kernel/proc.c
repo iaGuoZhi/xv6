@@ -239,8 +239,16 @@ int
 growproc(int n)
 {
   struct proc *p = myproc();
+  uint64 sz;
 
-  // lazy alloc
+  sz = p->sz;
+  if(n > 0){
+    if(p->sz + n > TRAPFRAME)
+      return 0;
+    // do nothing because of lazy alloc
+  } else if(n < 0){
+    sz = uvmdealloc(p->pagetable, sz, sz + n);
+  }
   p->sz = p->sz + n;
   return 0;
 }
