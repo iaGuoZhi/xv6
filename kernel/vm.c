@@ -4,12 +4,19 @@
 #include "elf.h"
 #include "riscv.h"
 #include "defs.h"
+#include "spinlock.h"
+#include "proc.h"
 #include "fs.h"
 
 /*
  * the kernel's page table.
  */
 pagetable_t kernel_pagetable;
+
+/*
+ * physical page refrence counters for user page
+ */
+uint8 page_counters[PHYSICAL_PAGE_NUM] = { 0 };
 
 extern char etext[];  // kernel.ld sets this to end of kernel code.
 
@@ -23,6 +30,9 @@ kvminit()
 {
   kernel_pagetable = (pagetable_t) kalloc();
   memset(kernel_pagetable, 0, PGSIZE);
+
+  // clear page reference counters
+  memset(page_counters, 0, sizeof(page_counters));
 
   // uart registers
   kvmmap(UART0, UART0, PGSIZE, PTE_R | PTE_W);
@@ -87,6 +97,64 @@ walk(pagetable_t pagetable, uint64 va, int alloc)
   }
   return &pagetable[PX(0, va)];
 }
+
+static int
+valid_fault_va(struct proc *p, uint64 va) {
+  uint64 sp = PGROUNDUP(p->trapframe->sp);
+  return (va < p->sz) &&
+    // not in stack guard page
+    !(va >= sp - 2 * PGSIZE && va < sp - PGSIZE);
+}
+
+uint64
+handle_page_fault(pagetable_t pagetable, uint64 va)
+{
+  pte_t *pte;
+  uint64 pa;
+  uint flags;
+  char *mem;
+
+  if(!valid_fault_va(myproc(), va))
+    return -1;
+
+  if((pte = walk(pagetable, va, 0)) == 0)
+    //TBD: lazy handle page fault
+    return -1;
+  if((*pte & PTE_V) == 0)
+    //TBD: lazy handle page fault
+    return -1;
+  // handle cow pages
+  if(*pte & PTE_COW) {
+    pa = PTE2PA(*pte);
+    flags = PTE_FLAGS(*pte);
+    if (flags & PTE_W)
+      panic("handle_page_fault: page should be RO");
+
+    // Only one pte reference this page,
+    // map as PTE_W directly.
+    if(page_counters[PHYSICAL_PAGE_IDX(pa)] == 1) {
+      *pte |= PTE_W;
+      *pte ^= PTE_COW;
+      return 0;
+    }
+
+    if((mem = kalloc()) == 0)
+      return -1;
+    memmove(mem, (char*)pa, PGSIZE);
+
+    // Unmap old page
+    uvmunmap(pagetable, va, 1, 1);
+
+    flags |= PTE_W;
+    flags ^= PTE_COW;
+    if(mappages(pagetable, va, PGSIZE, (uint64)mem, flags) != 0){
+      kfree(mem);
+    }
+  }
+
+  return 0;
+}
+
 
 // Look up a virtual address, return the physical address,
 // or 0 if not mapped.
@@ -311,7 +379,6 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
@@ -319,14 +386,18 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
+    // Clear PTE_W in parent's PTEs
+    if(*pte & PTE_W)
+      *pte ^= PTE_W;
+    // Set PTE_COW in parent's PTEs
+    *pte |= PTE_COW;
+
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+
+    if(mappages(new, i, PGSIZE, pa, flags) != 0){
       goto err;
     }
+    page_counters[(pa - KERNBASE) / PGSIZE] += 1;
   }
   return 0;
 
@@ -355,12 +426,19 @@ int
 copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 {
   uint64 n, va0, pa0;
+  pte_t *pte;
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;
+    pte = walk(pagetable, va0, 0);
+    if(*pte & PTE_COW) {
+      if(handle_page_fault(pagetable, va0) < 0)
+        return -1;
+      pa0 = walkaddr(pagetable, va0);
+    }
     n = PGSIZE - (dstva - va0);
     if(n > len)
       n = len;

@@ -12,6 +12,8 @@ struct proc proc[NPROC];
 
 struct proc *initproc;
 
+extern uint8 page_counters[PHYSICAL_PAGE_NUM];
+
 int nextpid = 1;
 struct spinlock pid_lock;
 
