@@ -19,14 +19,21 @@ struct run {
 };
 
 struct {
-  struct spinlock lock;
-  struct run *freelist;
+  struct spinlock lock[NCPU];
+  struct run* freelist[NCPU];
 } kmem;
 
 void
 kinit()
 {
-  initlock(&kmem.lock, "kmem");
+  static char names_buf[PGSIZE];
+  int off = 0;
+  for(int i = 0; i < NCPU; ++i) {
+    int n = snprintf(names_buf + off, PGSIZE - off, "kmem-%d", i);
+    initlock(&(kmem.lock[i]), names_buf + off);
+    names_buf[off + n] = 0;
+    off += (n + 1);
+  }
   freerange(end, (void*)PHYSTOP);
 }
 
@@ -47,6 +54,7 @@ void
 kfree(void *pa)
 {
   struct run *r;
+  int cpu;
 
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
@@ -56,10 +64,15 @@ kfree(void *pa)
 
   r = (struct run*)pa;
 
-  acquire(&kmem.lock);
-  r->next = kmem.freelist;
-  kmem.freelist = r;
-  release(&kmem.lock);
+  // cpu() should be called when interrupts are turned off
+  push_off();
+  cpu = cpuid();
+  pop_off();
+
+  acquire(&(kmem.lock[cpu]));
+  r->next = kmem.freelist[cpu];
+  kmem.freelist[cpu] = r;
+  release(&(kmem.lock[cpu]));
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -69,12 +82,32 @@ void *
 kalloc(void)
 {
   struct run *r;
+  int cpu;
 
-  acquire(&kmem.lock);
-  r = kmem.freelist;
+  // cpu() should be called when interrupts are turned off
+  push_off();
+  cpu = cpuid();
+  pop_off();
+
+  acquire(&(kmem.lock[cpu]));
+  r = kmem.freelist[cpu];
   if(r)
-    kmem.freelist = r->next;
-  release(&kmem.lock);
+    kmem.freelist[cpu] = r->next;
+  release(&(kmem.lock[cpu]));
+
+  // Current cpu's freelist is empty,
+  // borrow from others
+  if(!r) {
+    int idx = cpu;
+    do {
+      idx = (idx + 1) % NCPU;
+      acquire(&(kmem.lock[idx]));
+      r = kmem.freelist[idx];
+      if(r)
+        kmem.freelist[idx] = r->next;
+      release(&(kmem.lock[idx]));
+    } while(!r && idx != cpu);
+  }
 
   if(r)
     memset((char*)r, 5, PGSIZE); // fill with junk

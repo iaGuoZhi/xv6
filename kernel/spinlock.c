@@ -195,6 +195,7 @@ statslock(char *buf, int sz) {
     for(int i = 0; i < NLOCK; i++) {
       if(locks[i] == 0)
         break;
+      // Bug here, what if locks[i]->nts == last?
       if(locks[i]->nts > locks[top]->nts && locks[i]->nts < last) {
         top = i;
       }
