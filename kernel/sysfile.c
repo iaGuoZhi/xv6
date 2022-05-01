@@ -283,6 +283,34 @@ create(char *path, short type, short major, short minor)
   return ip;
 }
 
+// Create the path new as a link to the same inode as old.
+uint64
+sys_symlink(void)
+{
+  char new[MAXPATH], old[MAXPATH];
+  struct inode *ip;
+
+  if(argstr(0, old, MAXPATH) < 0 || argstr(1, new, MAXPATH) < 0)
+    return -1;
+
+  begin_op();
+
+  if((ip = create(new, T_SYMLINK, 0, 0)) == 0)
+    goto bad;
+
+  if(writei(ip, 0, (uint64)old, 0, MAXPATH) <= 0)
+    goto bad;
+
+  iunlockput(ip);
+  end_op();
+
+  return 0;
+
+bad:
+  end_op();
+  return -1;
+}
+
 uint64
 sys_open(void)
 {
@@ -290,6 +318,7 @@ sys_open(void)
   int fd, omode;
   struct file *f;
   struct inode *ip;
+  int rec = 0, rec_max = 10;
   int n;
 
   if((n = argstr(0, path, MAXPATH)) < 0 || argint(1, &omode) < 0)
@@ -309,6 +338,28 @@ sys_open(void)
       return -1;
     }
     ilock(ip);
+    while(ip->type == T_SYMLINK && !(omode & O_NOFOLLOW)) {
+      memset(path, 0, MAXPATH);
+      if(readi(ip, 0, (uint64)path, 0, MAXPATH) <= 0) {
+        panic("symbolic error");
+        iunlockput(ip);
+        end_op();
+        return -1;
+      }
+      iunlockput(ip);
+
+      if((ip = namei(path)) == 0){
+        end_op();
+        return -1;
+      }
+
+      if(++rec >= rec_max){
+        end_op();
+        return -1;
+      }
+      ilock(ip);
+    }
+ 
     if(ip->type == T_DIR && omode != O_RDONLY){
       iunlockput(ip);
       end_op();
