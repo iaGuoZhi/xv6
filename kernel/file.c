@@ -180,3 +180,14 @@ filewrite(struct file *f, uint64 addr, int n)
   return ret;
 }
 
+int
+readpage(struct file *f, uint64 dst, int off, int n)
+{
+  int r;
+
+  ilock(f->ip);
+  r = readi(f->ip, 0, dst, off, n);
+  iunlock(f->ip);
+
+  return r;
+}

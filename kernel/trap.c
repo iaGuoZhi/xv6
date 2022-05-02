@@ -67,6 +67,10 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
+  } else if(r_scause() == 13 || r_scause() == 15){
+    // handle page fault trap
+    if(handle_page_fault(p->pagetable, PGROUNDDOWN(r_stval()), 0) == -1)
+      p->killed = 1;
   } else {
     printf("usertrap(): unexpected scause %p pid=%d\n", r_scause(), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
@@ -144,9 +148,17 @@ kerneltrap()
     panic("kerneltrap: interrupts enabled");
 
   if((which_dev = devintr()) == 0){
-    printf("scause %p\n", scause);
-    printf("sepc=%p stval=%p\n", r_sepc(), r_stval());
-    panic("kerneltrap");
+    if(r_scause() == 13 || r_scause() == 15) {
+      if(handle_page_fault(myproc()->pagetable, PGROUNDDOWN(r_stval()), 0) == -1)
+        myproc()->killed = 1;
+
+      if(myproc()->killed)
+        exit(-1);
+    } else {
+      printf("scause %p\n", scause);
+      printf("sepc=%p stval=%p\n", r_sepc(), r_stval());
+      panic("kerneltrap");
+    }
   }
 
   // give up the CPU if this is a timer interrupt.

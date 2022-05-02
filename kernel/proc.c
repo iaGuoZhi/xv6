@@ -128,6 +128,9 @@ found:
     return 0;
   }
 
+  // Empty vma list
+  memset(p->vmas, 0, sizeof(p->vmas));
+
   // Set up new context to start executing at forkret,
   // which returns to user space.
   memset(&p->context, 0, sizeof(p->context));
@@ -245,19 +248,33 @@ userinit(void)
 int
 growproc(int n)
 {
-  uint sz;
   struct proc *p = myproc();
+  uint64 sz;
 
   sz = p->sz;
   if(n > 0){
-    if((sz = uvmalloc(p->pagetable, sz, sz + n)) == 0) {
-      return -1;
-    }
+    if(p->sz + n > TRAPFRAME)
+      return 0;
+    // do nothing because of lazy alloc
   } else if(n < 0){
     sz = uvmdealloc(p->pagetable, sz, sz + n);
   }
-  p->sz = sz;
+  p->sz = p->sz + n;
   return 0;
+}
+
+static void
+vma_copy(struct proc *dst_p, struct proc *src_p)
+{
+  for(int i = 0; i < VMA_NUM; ++i){
+    dst_p->vmas[i].addr = src_p->vmas[i].addr;
+    dst_p->vmas[i].len = src_p->vmas[i].len;
+    dst_p->vmas[i].file = src_p->vmas[i].file;
+    filedup(dst_p->vmas[i].file);
+    dst_p->vmas[i].file_off = src_p->vmas[i].file_off;
+    dst_p->vmas[i].prot_mode = src_p->vmas[i].prot_mode;
+    dst_p->vmas[i].flags = src_p->vmas[i].flags;
+  }
 }
 
 // Create a new process, copying the parent.
@@ -297,6 +314,7 @@ fork(void)
   np->cwd = idup(p->cwd);
 
   safestrcpy(np->name, p->name, sizeof(p->name));
+  vma_copy(np, p);
 
   pid = np->pid;
 

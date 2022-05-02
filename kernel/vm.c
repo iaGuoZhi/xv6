@@ -5,7 +5,8 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
-
+#include "spinlock.h"
+#include "proc.h"
 /*
  * the kernel's page table.
  */
@@ -65,6 +66,60 @@ kvminithart()
   sfence_vma();
 }
 
+static int
+valid_fault_va(struct proc *p, uint64 va) {
+  uint64 sp = PGROUNDUP(p->trapframe->sp);
+  return (va < p->sz) &&
+    // not in stack guard page
+    !(va >= sp - 2 * PGSIZE && va < sp - PGSIZE);
+}
+
+uint64
+handle_page_fault(pagetable_t pagetable, uint64 va, int walkaddr) {
+  uint64 pa0;
+  char *mem;
+  struct vma *vma = 0;
+  struct proc *p = myproc();
+  uint n;
+  int flags = PTE_W|PTE_X|PTE_R|PTE_U;
+
+  va = PGROUNDDOWN(va);
+  if(!valid_fault_va(myproc(), va))
+    return -1;
+
+  // Find vma (mmap only)
+  for(int i = 0; i < VMA_NUM; ++i) {
+    if(p->vmas[i].addr <= va && va < p->vmas[i].addr + p->vmas[i].len) {
+      vma = &(p->vmas[i]);
+    }
+  }
+
+  // walkaddr does not handle mmap fault
+  if(walkaddr && vma){
+    return -1;
+  }
+
+  if((mem = kalloc())== 0)
+    return -1;
+  memset(mem, 0, PGSIZE);
+
+  // mmap file
+  if(vma) {
+    n = vma->len - (va - vma->addr);
+    n = n > PGSIZE ? PGSIZE : n;
+    if(readpage(vma->file, (uint64)mem, vma->file_off + va - vma->addr, n) <= 0)
+      panic("handle_page_fault: read file error");
+    flags = PTE_V|PTE_U|(vma->prot_mode << 1);
+  }
+
+  if(mappages(pagetable, va, PGSIZE, (uint64)mem, flags) != 0){
+    kfree(mem);
+    return -1;
+  }
+  pa0 = (uint64)mem;
+  return pa0;
+}
+
 // Return the address of the PTE in page table pagetable
 // that corresponds to virtual address va.  If alloc!=0,
 // create any required page-table pages.
@@ -110,10 +165,15 @@ walkaddr(pagetable_t pagetable, uint64 va)
     return 0;
 
   pte = walk(pagetable, va, 0);
-  if(pte == 0)
-    return 0;
-  if((*pte & PTE_V) == 0)
-    return 0;
+  if(pte == 0 || (*pte & PTE_V) == 0)
+  {
+    pa = handle_page_fault(pagetable, va, 1);
+    if(pa == -1)
+      return 0;
+    pte = walk(pagetable, va, 0);
+    if(pte == 0 || (*pte & PTE_V) == 0)
+      return 0;
+  }
   if((*pte & PTE_U) == 0)
     return 0;
   pa = PTE2PA(*pte);
@@ -170,9 +230,9 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 npages, int do_free)
 
   for(a = va; a < va + npages*PGSIZE; a += PGSIZE){
     if((pte = walk(pagetable, a, 0)) == 0)
-      panic("uvmunmap: walk");
+      continue;
     if((*pte & PTE_V) == 0)
-      panic("uvmunmap: not mapped");
+      continue;
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
     if(do_free){
@@ -304,9 +364,11 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
-      panic("uvmcopy: pte should exist");
+      // lazy alloc
+      continue;
     if((*pte & PTE_V) == 0)
-      panic("uvmcopy: page not present");
+      // lazy alloc
+      continue;
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
     if((mem = kalloc()) == 0)
@@ -428,16 +490,4 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
-}
-
-char*
-sys_mmap(void *addr, uint64 length, int prot, int flags, int fd, uint64 offset)
-{
-  return (char *)-1;
-}
-
-void
-sys_munmap(void *addr, uint64 length)
-{
-  return;
 }

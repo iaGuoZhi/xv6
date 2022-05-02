@@ -484,3 +484,90 @@ sys_pipe(void)
   }
   return 0;
 }
+
+char*
+sys_mmap(void)
+{
+  struct proc *p = myproc();
+  uint64 sz, addr;
+  int length, offset, prot, flags;
+  struct file *f;
+  struct vma *cur_vma = 0;
+
+  if(argaddr(0, &addr) < 0 || argint(1, &length) < 0 || argint(2, &prot) < 0 ||
+      argint(3, &flags) < 0 || argfd(4, 0, &f) < 0 || argint(5, &offset) < 0)
+    return (char *)-1;
+
+  // check mmap is valid or not
+  // 1: user specified addr not supported
+  if(addr != 0) {
+    panic("sys_mmap: addr should be 0");
+  }
+  // 2: port should not exceed file permission
+  // should be able to map file opened read-only with private writable
+  if((!f->writable && (prot & PROT_WRITE) && !(flags & MAP_PRIVATE)) ||
+      (!f->readable && (prot & PROT_READ)))
+    return (char *)-1;
+
+  sz = p->sz;
+  p->sz = p->sz + length;
+
+  // Find free vma
+  for(int i = 0; i < VMA_NUM; ++i) {
+    if(p->vmas[i].addr == 0) {
+      cur_vma = &(p->vmas[i]);
+      break;
+    }
+  }
+
+  if(cur_vma == 0)
+    panic("sys_mmap: no free vma");
+
+  // Increase the file's reference count
+  filedup(f);
+
+  cur_vma->addr = sz;
+  cur_vma->len = length;
+  cur_vma->file = f;
+  cur_vma->file_off = offset;
+  cur_vma->prot_mode = prot;
+  cur_vma->flags = flags;
+
+  return (void *)cur_vma->addr;
+}
+
+// Temp implementation
+int
+sys_munmap(void)
+{
+  uint64 addr;
+  int length;
+  struct proc *p = myproc();
+
+  if(argaddr(0, &addr) < 0 || argint(1, &length) < 0)
+    return -1;
+
+  // Find vma
+  for(int i = 0; i < VMA_NUM; ++i) {
+    if(p->vmas[i].addr == addr) {
+      filewrite(p->vmas[i].file, addr, length);
+
+      if(length > p->vmas[i].len) {
+        panic("sys_munmap");
+      }
+
+      if(length == p->vmas[i].len) {
+        fileclose(p->vmas[i].file);
+        memset(&(p->vmas[i]), 0, sizeof(struct vma));
+      } else {
+        p->vmas[i].len = p->vmas[i].len - length;
+        p->vmas[i].addr += length;
+        p->vmas[i].file_off += length;
+      }
+      //uvmunmap(p->pagetable, p->vmas[i].addr, length/PGSIZE, 1);
+      return 0;
+    }
+  }
+
+  return -1;
+}
