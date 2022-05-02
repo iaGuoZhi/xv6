@@ -22,6 +22,8 @@ entry("pipe");
 entry("read");
 entry("write");
 entry("close");
+entry("mmap");
+entry("munmap");
 entry("kill");
 entry("exec");
 entry("open");

@@ -429,3 +429,15 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
     return -1;
   }
 }
+
+char*
+sys_mmap(void *addr, uint64 length, int prot, int flags, int fd, uint64 offset)
+{
+  return (char *)-1;
+}
+
+void
+sys_munmap(void *addr, uint64 length)
+{
+  return;
+}
