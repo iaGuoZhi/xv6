@@ -95,26 +95,79 @@ e1000_init(uint32 *xregs)
 int
 e1000_transmit(struct mbuf *m)
 {
-  //
-  // Your code here.
-  //
   // the mbuf contains an ethernet frame; program it into
   // the TX descriptor ring so that the e1000 sends it. Stash
   // a pointer so that it can be freed after sending.
   //
+  struct tx_desc *desc;
+  struct mbuf *free_mbuf;
+
+  // regs[E1000_TDT] access should be protected
+  acquire(&e1000_lock);
   
+  int desc_idx = regs[E1000_TDT];
+  if(desc_idx < 0 || desc_idx >= TX_RING_SIZE)
+  {
+    release(&e1000_lock);
+    panic("e1000_transmit");
+  }
+
+  desc = &(tx_ring[desc_idx]);
+  if(!(desc->status & E1000_TXD_STAT_DD))
+  {
+    release(&e1000_lock);
+    return -1;
+  }
+
+  free_mbuf = tx_mbufs[desc_idx];
+  while(free_mbuf) {
+   struct mbuf *t = free_mbuf; 
+   free_mbuf = free_mbuf->next;
+   mbuffree(t);
+  }
+
+  desc->addr = (uint64)m->head;
+  desc->length = m->len;
+  desc->cmd = E1000_TXD_CMD_EOP | E1000_TXD_CMD_RS;
+  tx_mbufs[desc_idx] = m;
+
+  // Commit point
+  regs[E1000_TDT] = (regs[E1000_TDT] + 1) % TX_RING_SIZE;
+  __sync_synchronize();
+
+  release(&e1000_lock);
+
   return 0;
 }
 
 static void
 e1000_recv(void)
 {
-  //
-  // Your code here.
-  //
   // Check for packets that have arrived from the e1000
   // Create and deliver an mbuf for each packet (using net_rx()).
   //
+  struct rx_desc *desc;
+  int desc_idx;
+
+  desc_idx = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
+  desc= &(rx_ring[desc_idx]);
+  while(desc->status & E1000_RXD_STAT_DD){
+    rx_mbufs[desc_idx]->len = desc->length;
+    net_rx(rx_mbufs[desc_idx]);
+
+    rx_mbufs[desc_idx] = mbufalloc(0);
+    desc->addr = (uint64)rx_mbufs[desc_idx]->head;
+    desc->length = rx_mbufs[desc_idx]->len;
+    desc->status = 0;
+
+    desc_idx = (desc_idx + 1) % RX_RING_SIZE;
+    desc= &(rx_ring[desc_idx]);
+  }
+
+  // Software adds receive descriptors by writing the tail pointer 
+  // with the index of the entry beyond the last valid descriptor
+  regs[E1000_RDT] = (desc_idx - 1) % RX_RING_SIZE;
+  __sync_synchronize();
 }
 
 void
