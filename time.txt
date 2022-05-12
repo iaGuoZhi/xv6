@@ -1,1 +1,3 @@
-4
+util lab: 7h23min
+thread lab: 4h
+net lab: 5h
