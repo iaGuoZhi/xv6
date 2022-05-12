@@ -1,1 +1,2 @@
-5
+util lab: 7h23min
+net lab: 5h

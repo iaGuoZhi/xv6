@@ -33,7 +33,11 @@ OBJS = \
   $K/sysfile.o \
   $K/kernelvec.o \
   $K/plic.o \
-  $K/virtio_disk.o
+  $K/virtio_disk.o \
+
+ifeq ($(LAB),pgtbl)
+OBJS += $K/vmcopyin.o
+endif
 
 OBJS_KCSAN = \
   $K/start.o \
@@ -186,6 +190,11 @@ UPROGS=\
 	$U/_grep\
 	$U/_init\
 	$U/_kill\
+	$U/_sleep\
+	$U/_pingpong\
+	$U/_primes\
+	$U/_xargs\
+	$U/_find\
 	$U/_ln\
 	$U/_ls\
 	$U/_mkdir\
@@ -196,8 +205,6 @@ UPROGS=\
 	$U/_grind\
 	$U/_wc\
 	$U/_zombie\
-
-
 
 
 ifeq ($(LAB),$(filter $(LAB), pgtbl lock))
@@ -261,7 +268,6 @@ UEXTRA=
 ifeq ($(LAB),util)
 	UEXTRA += user/xargstest.sh
 endif
-
 
 fs.img: mkfs/mkfs README $(UEXTRA) $(UPROGS)
 	mkfs/mkfs fs.img README $(UEXTRA) $(UPROGS)
