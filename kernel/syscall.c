@@ -106,6 +106,9 @@ extern uint64 sys_write(void);
 extern uint64 sys_uptime(void);
 extern uint64 sys_trace(void);
 extern uint64 sys_sysinfo(void);
+#ifdef LAB_NET
+extern uint64 sys_connect(void);
+#endif
 
 static uint64 (*syscalls[])(void) = {
 [SYS_fork]    sys_fork,
@@ -131,6 +134,9 @@ static uint64 (*syscalls[])(void) = {
 [SYS_close]   sys_close,
 [SYS_trace]   sys_trace,
 [SYS_sysinfo]   sys_sysinfo,
+#ifdef LAB_NET
+[SYS_connect] sys_connect,
+#endif
 };
 
 static char* syscall_names[] = {
@@ -157,7 +163,12 @@ static char* syscall_names[] = {
 [SYS_close]   "close",
 [SYS_trace]   "trace",
 [SYS_sysinfo]   "sysinfo",
+#ifdef LAB_NET
+[SYS_connect] "connect",
+#endif
 };
+
+
 
 void
 syscall(void)
