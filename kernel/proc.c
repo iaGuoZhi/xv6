@@ -156,6 +156,7 @@ freeproc(struct proc *p)
   p->chan = 0;
   p->killed = 0;
   p->xstate = 0;
+  p->trace_bits = 0;
   p->state = UNUSED;
 }
 
@@ -299,6 +300,9 @@ fork(void)
   safestrcpy(np->name, p->name, sizeof(p->name));
 
   pid = np->pid;
+
+  // copy trace bits
+  np->trace_bits = p->trace_bits;
 
   np->state = RUNNABLE;
 
@@ -701,4 +705,22 @@ procdump(void)
     printf("%d %s %s", p->pid, state, p->name);
     printf("\n");
   }
+}
+
+// Return number of processes
+uint64
+proc_number(void)
+{
+  uint64 proc_num = 0;
+  struct proc *p;
+
+  for(p = proc; p < &proc[NPROC]; p++){
+    acquire(&p->lock);
+    if(p->state != UNUSED){
+        proc_num += 1;
+    }
+    release(&p->lock);
+  }
+
+  return proc_num;
 }
