@@ -1,0 +1,9 @@
+1. sequence of events with 2 threads that can lead to a key being missing.
+
+if two thread concurrently call 
+insert(key, value, &table[i], table[i]);
+with the same arguments(the table is a global variables, can be seen between threads)
+Assume thread1 insert its key into table[i], then thread2 insert its key into table[i]
+the key of thread1 will be missed.
+
+2. The breakpoint may (or may not) be triggered before you even run uthread. How could that happen?
