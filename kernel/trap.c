@@ -66,7 +66,17 @@ usertrap(void)
 
     syscall();
   } else if((which_dev = devintr()) != 0){
-    // ok
+    if(which_dev == 2){
+      p->sigalarm_passed_ticks += 1;
+      if(p->in_sig_handler == 0 && p->sigalarm_passed_ticks == p->sigalarm_total_ticks) {
+        p->sigalarm_passed_ticks = 0;
+        for(int i = 0; i < sizeof(struct sigreturn_context) / sizeof(uint64); ++i) {
+          *(((uint64 *) &(p->sigreturn_context)) + i) = *(((uint64 *) p->trapframe) + i);
+        }
+        p->trapframe->epc = (uint64)p->sigalarm_fn;
+        p->in_sig_handler = 1;
+      }
+    }
   } else {
 
     
